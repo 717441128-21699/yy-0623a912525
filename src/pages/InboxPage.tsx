@@ -221,18 +221,19 @@ export default function InboxPage({ onDataChange }: Props) {
           </Row>
 
           <div className="form-section-title">术前术后照片（{selectedFiles.length}张）</div>
-          <Dragger
-            multiple
-            accept="image/*"
-            showUploadList={false}
-            beforeUpload={() => false}
-            onClick={selectFiles}
-            style={{ padding: '16px' }}
-          >
-            <p className="ant-upload-drag-icon"><InboxOutlined style={{ color: '#1d4e89' }} /></p>
-            <p className="ant-upload-text">点击或拖拽照片到此区域</p>
-            <p className="ant-upload-hint">支持 JPG、PNG 等格式，建议包含术前、术后各阶段对比照</p>
-          </Dragger>
+          <div onClick={selectFiles} style={{ cursor: 'pointer' }}>
+            <Dragger
+              multiple
+              accept="image/*"
+              showUploadList={false}
+              beforeUpload={() => false}
+              style={{ padding: '16px', pointerEvents: 'none' }}
+            >
+              <p className="ant-upload-drag-icon"><InboxOutlined style={{ color: '#1d4e89' }} /></p>
+              <p className="ant-upload-text">点击或拖拽照片到此区域</p>
+              <p className="ant-upload-hint">支持 JPG、PNG 等格式，建议包含术前、术后各阶段对比照</p>
+            </Dragger>
+          </div>
 
           {selectedFiles.length > 0 && (
             <div style={{ marginTop: 16 }}>

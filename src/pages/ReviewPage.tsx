@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Row, Col, Button, Table, Tag, Space, Modal, Form, Input, Select,
-  message, Empty, Drawer, Divider, Radio, Descriptions
+  message, Empty, Drawer, Divider, Radio, Descriptions, Skeleton
 } from 'antd'
 import {
   AuditOutlined, CheckOutlined, RollbackOutlined, StopOutlined,
@@ -17,25 +17,46 @@ interface Props {
   onDataChange?: () => void
 }
 
+interface CaseWithReview extends CaseItem {
+  lastReview?: ReviewItem | null
+}
+
 export default function ReviewPage({ onDataChange }: Props) {
-  const [cases, setCases] = useState<CaseItem[]>([])
+  const [cases, setCases] = useState<CaseWithReview[]>([])
   const [reviewOpen, setReviewOpen] = useState(false)
-  const [currentCase, setCurrentCase] = useState<CaseItem | null>(null)
+  const [currentCase, setCurrentCase] = useState<CaseWithReview | null>(null)
   const [currentAssets, setCurrentAssets] = useState<AssetItem[]>([])
   const [reviews, setReviews] = useState<ReviewItem[]>([])
   const [detailOpen, setDetailOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [form] = Form.useForm()
   const [submitting, setSubmitting] = useState(false)
 
   const loadData = async () => {
-    const list = await caseApi.list()
-    setCases(list)
+    setLoading(true)
+    try {
+      const list = await caseApi.list()
+      const reviewMap = new Map<string, ReviewItem>()
+      await Promise.all(
+        list.map(async (c) => {
+          const rs = await reviewApi.list(c.id)
+          if (rs && rs.length > 0) reviewMap.set(c.id, rs[0])
+        })
+      )
+      const enriched: CaseWithReview[] = list.map(c => ({
+        ...c,
+        lastReview: reviewMap.get(c.id) || null
+      }))
+      setCases(enriched)
+    } finally {
+      setLoading(false)
+    }
     onDataChange?.()
   }
 
   useEffect(() => { loadData() }, [])
 
-  const openReview = async (c: CaseItem) => {
+  const openReview = async (c: CaseWithReview) => {
     setCurrentCase(c)
     const [assets, rvs] = await Promise.all([assetApi.list(c.id), reviewApi.list(c.id)])
     setCurrentAssets(assets)
@@ -44,7 +65,7 @@ export default function ReviewPage({ onDataChange }: Props) {
     setReviewOpen(true)
   }
 
-  const openDetail = async (c: CaseItem) => {
+  const openDetail = async (c: CaseWithReview) => {
     setCurrentCase(c)
     const [assets, rvs] = await Promise.all([assetApi.list(c.id), reviewApi.list(c.id)])
     setCurrentAssets(assets)
@@ -66,6 +87,22 @@ export default function ReviewPage({ onDataChange }: Props) {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const renderLastReview = (r: CaseWithReview) => {
+    if (!r.lastReview) return <span style={{ color: '#94a3b8', fontSize: 12 }}>尚无审核记录</span>
+    const lr = r.lastReview
+    const statusInfo = CASE_STATUS[lr.status as keyof typeof CASE_STATUS]
+    return (
+      <Space direction="vertical" size={0} style={{ lineHeight: 1.5 }}>
+        <Tag color={(statusInfo?.color || 'default') as any} style={{ margin: 0 }}>
+          {statusInfo?.label || lr.status}
+        </Tag>
+        <span style={{ fontSize: 11, color: '#94a3b8' }}>
+          {lr.reviewer} · {String(lr.created_at || '').slice(5, 16)}
+        </span>
+      </Space>
+    )
   }
 
   const columns = [
@@ -110,24 +147,14 @@ export default function ReviewPage({ onDataChange }: Props) {
       title: '最近审核',
       key: 'last',
       width: 160,
-      render: async (_: any, r: CaseItem) => {
-        const list = await reviewApi.list(r.id)
-        if (list.length === 0) return <span style={{ color: '#94a3b8' }}>尚无审核记录</span>
-        const last = list[0]
-        return (
-          <Space direction="vertical" size={0}>
-            <Tag color={CASE_STATUS[last.status as keyof typeof CASE_STATUS]?.color as any}>{CASE_STATUS[last.status as keyof typeof CASE_STATUS]?.label || last.status}</Tag>
-            <span style={{ fontSize: 11, color: '#94a3b8' }}>{last.reviewer} · {last.created_at?.slice(5, 16)}</span>
-          </Space>
-        )
-      }
+      render: (_: any, r: CaseWithReview) => renderLastReview(r)
     },
     {
       title: '操作',
       key: 'actions',
       width: 180,
       fixed: 'right' as const,
-      render: (_: any, r: CaseItem) => (
+      render: (_: any, r: CaseWithReview) => (
         <Space size="small">
           <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => openDetail(r)}>审核记录</Button>
           <Button type="primary" size="small" icon={<AuditOutlined />} onClick={() => openReview(r)}>审核</Button>
@@ -189,13 +216,17 @@ export default function ReviewPage({ onDataChange }: Props) {
 
       <div className="card-section">
         <div className="card-section-title">审核列表</div>
-        <Table
-          rowKey="id"
-          columns={columns}
-          dataSource={cases}
-          pagination={{ pageSize: 10 }}
-          scroll={{ x: 1100 }}
-        />
+        {loading ? (
+          <Skeleton active paragraph={{ rows: 8 }} />
+        ) : (
+          <Table
+            rowKey="id"
+            columns={columns}
+            dataSource={cases}
+            pagination={{ pageSize: 10 }}
+            scroll={{ x: 1100 }}
+          />
+        )}
       </div>
 
       <Modal
@@ -207,6 +238,7 @@ export default function ReviewPage({ onDataChange }: Props) {
         width={860}
         okText="提交审核"
         cancelText="取消"
+        destroyOnClose
       >
         {currentCase && (
           <div>
@@ -312,6 +344,7 @@ export default function ReviewPage({ onDataChange }: Props) {
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
         width={720}
+        destroyOnClose
       >
         {currentCase && (
           <div>

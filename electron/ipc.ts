@@ -194,7 +194,7 @@ export function registerIpcHandlers() {
         const ry = Math.round((area.y / 100) * h)
         const rw = Math.round((area.width / 100) * w)
         const rh = Math.round((area.height / 100) * h)
-        const cell = Math.max(8, Math.round(Math.min(rw, rh) / 12))
+        const cell = Math.max(20, Math.round(Math.min(rw, rh) / 8))
         for (let yy = ry; yy < ry + rh && yy < h; yy += cell) {
           for (let xx = rx; xx < rx + rw && xx < w; xx += cell) {
             const cw = Math.min(cell, rx + rw - xx, w - xx)
@@ -244,7 +244,7 @@ export function registerIpcHandlers() {
       const textH = Jimp.measureTextHeight(font, text, w)
       const x = w - textW - 20
       const y = img.getHeight() - textH - 20
-      img.color([{ apply: 'shade', params: [20] }])
+      img.color([{ apply: 'darken' as any, params: [20] }])
       img.print(font, x, y, text)
       await img.writeAsync(destPath)
       run('UPDATE assets SET processed_path = ?, watermark_applied = 1 WHERE id = ?', [destPath, assetId])

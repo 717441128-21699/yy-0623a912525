@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Row, Col, Card, Button, Table, Tag, Space, Modal, Form, Input, DatePicker,
-  Checkbox, Select, message, Alert, Empty, Progress, Descriptions
+  Checkbox, Select, message, Alert, Empty, Progress, Descriptions, Skeleton
 } from 'antd'
 import {
   SafetyCertificateOutlined, WarningOutlined, CheckCircleOutlined,
@@ -15,27 +15,86 @@ interface Props {
   onDataChange?: () => void
 }
 
+interface CaseWithAuth extends CaseItem {
+  auth?: AuthorizationItem | null
+  authScore?: number
+  authStatusLabel?: string
+  authStatusColor?: string
+  authIcon?: any
+}
+
+function calcAuthScore(a: AuthorizationItem | null | undefined) {
+  if (!a) return 0
+  let score = 0
+  if (a.customer_name) score += 15
+  if (a.signed_date) score += 15
+  if (a.expire_date) score += 20
+  if (a.auth_scope) score += 10
+  if (a.has_identity) score += 15
+  if (a.has_signature) score += 15
+  if (a.has_full_content) score += 10
+  return score
+}
+
+function getAuthStatus(a: AuthorizationItem | null | undefined) {
+  if (!a) {
+    return { label: '未建档', color: 'default', icon: <CloseCircleOutlined /> }
+  }
+  const expired = a.expire_date && dayjs(a.expire_date).isBefore(dayjs())
+  const willExpire = a.expire_date && dayjs(a.expire_date).isBefore(dayjs().add(30, 'day')) && !expired
+  const score = calcAuthScore(a)
+  if (expired) return { label: '已过期', color: 'error', icon: <ExclamationCircleOutlined /> }
+  if (willExpire) return { label: '即将过期', color: 'warning', icon: <ClockCircleOutlined /> }
+  if (score >= 80) return { label: '完整', color: 'success', icon: <CheckCircleOutlined /> }
+  if (score >= 50) return { label: '基本完整', color: 'processing', icon: null }
+  return { label: '待补全', color: 'warning', icon: <WarningOutlined /> }
+}
+
 export default function AuthPage({ onDataChange }: Props) {
-  const [cases, setCases] = useState<CaseItem[]>([])
+  const [cases, setCases] = useState<CaseWithAuth[]>([])
   const [expiring, setExpiring] = useState<AuthorizationItem[]>([])
-  const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null)
+  const [selectedCase, setSelectedCase] = useState<CaseWithAuth | null>(null)
   const [authData, setAuthData] = useState<AuthorizationItem | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [form] = Form.useForm()
 
   const loadData = async () => {
-    const [list, exp] = await Promise.all([caseApi.list(), authApi.listExpiring(30)])
-    setCases(list)
-    setExpiring(exp)
+    setLoading(true)
+    try {
+      const [list, exp] = await Promise.all([caseApi.list(), authApi.listExpiring(30)])
+      const authMap = new Map<string, AuthorizationItem>()
+      await Promise.all(
+        list.map(async (c) => {
+          const a = await authApi.get(c.id)
+          if (a) authMap.set(c.id, a)
+        })
+      )
+      const enriched: CaseWithAuth[] = list.map(c => {
+        const auth = authMap.get(c.id) || null
+        const status = getAuthStatus(auth)
+        return {
+          ...c,
+          auth,
+          authScore: calcAuthScore(auth),
+          authStatusLabel: status.label,
+          authStatusColor: status.color as any,
+          authIcon: status.icon
+        }
+      })
+      setCases(enriched)
+      setExpiring(exp)
+    } finally {
+      setLoading(false)
+    }
     onDataChange?.()
   }
 
   useEffect(() => { loadData() }, [])
 
-  const loadAuth = async (c: CaseItem) => {
+  const loadAuth = async (c: CaseWithAuth) => {
     setSelectedCase(c)
-    const a = await authApi.get(c.id)
-    setAuthData(a || null)
+    setAuthData(c.auth || null)
   }
 
   const openEdit = () => {
@@ -70,30 +129,17 @@ export default function AuthPage({ onDataChange }: Props) {
       }
       message.success('授权信息已保存')
       setModalOpen(false)
-      loadAuth(selectedCase!)
       loadData()
     } catch (e: any) {
       if (!e?.errorFields) message.error('保存失败')
     }
   }
 
-  const completenessScore = () => {
-    if (!authData) return 0
-    let score = 0
-    if (authData.customer_name) score += 15
-    if (authData.signed_date) score += 15
-    if (authData.expire_date) score += 20
-    if (authData.auth_scope) score += 10
-    if (authData.has_identity) score += 15
-    if (authData.has_signature) score += 15
-    if (authData.has_full_content) score += 10
-    return score
-  }
-
-  const isExpiring = () => {
+  const completenessScore = useMemo(() => calcAuthScore(authData), [authData])
+  const isExpiring = useMemo(() => {
     if (!authData?.expire_date) return false
     return dayjs(authData.expire_date).isBefore(dayjs().add(30, 'day'))
-  }
+  }, [authData])
 
   const columns = [
     {
@@ -120,33 +166,20 @@ export default function AuthPage({ onDataChange }: Props) {
     },
     {
       title: '授权状态',
+      dataIndex: 'authStatusLabel',
       key: 'auth_status',
       width: 120,
-      render: async (_: any, r: CaseItem) => {
-        const a = await authApi.get(r.id)
-        if (!a) return <Tag color="default" icon={<CloseCircleOutlined />}>未建档</Tag>
-        const score = (() => {
-          let s = 0
-          if (a.customer_name) s += 15; if (a.signed_date) s += 15
-          if (a.expire_date) s += 20; if (a.auth_scope) s += 10
-          if (a.has_identity) s += 15; if (a.has_signature) s += 15
-          if (a.has_full_content) s += 10
-          return s
-        })()
-        const expired = a.expire_date && dayjs(a.expire_date).isBefore(dayjs())
-        const willExpire = a.expire_date && dayjs(a.expire_date).isBefore(dayjs().add(30, 'day')) && !expired
-        if (expired) return <Tag color="error" icon={<ExclamationCircleOutlined />}>已过期</Tag>
-        if (willExpire) return <Tag color="warning" icon={<ClockCircleOutlined />}>即将过期</Tag>
-        if (score >= 80) return <Tag color="success" icon={<CheckCircleOutlined />}>完整</Tag>
-        if (score >= 50) return <Tag color="processing">基本完整</Tag>
-        return <Tag color="warning" icon={<WarningOutlined />}>待补全</Tag>
-      }
+      render: (_: any, r: CaseWithAuth) => (
+        <Tag color={r.authStatusColor as any} icon={r.authIcon}>
+          {r.authStatusLabel}
+        </Tag>
+      )
     },
     {
       title: '操作',
       key: 'actions',
       width: 100,
-      render: (_: any, r: CaseItem) => (
+      render: (_: any, r: CaseWithAuth) => (
         <Button type="link" size="small" icon={<EditOutlined />} onClick={() => loadAuth(r)}>核验授权</Button>
       )
     }
@@ -186,14 +219,18 @@ export default function AuthPage({ onDataChange }: Props) {
         <Col span={14}>
           <div className="card-section">
             <div className="card-section-title">案例授权列表</div>
-            <Table
-              rowKey="id"
-              columns={columns}
-              dataSource={cases}
-              pagination={{ pageSize: 8 }}
-              scroll={{ y: 480 }}
-              onRow={r => ({ onClick: () => loadAuth(r), style: { cursor: 'pointer' } })}
-            />
+            {loading ? (
+              <Skeleton active paragraph={{ rows: 6 }} />
+            ) : (
+              <Table
+                rowKey="id"
+                columns={columns}
+                dataSource={cases}
+                pagination={{ pageSize: 8 }}
+                scroll={{ y: 480 }}
+                onRow={r => ({ onClick: () => loadAuth(r), style: { cursor: 'pointer' } })}
+              />
+            )}
           </div>
         </Col>
         <Col span={10}>
@@ -222,17 +259,17 @@ export default function AuthPage({ onDataChange }: Props) {
                   <Col span={12}>
                     <Card size="small" style={{ background: '#f8fafc', border: 'none' }}>
                       <div style={{ fontSize: 12, color: '#64748b' }}>授权完整度</div>
-                      <Progress percent={completenessScore()}
-                        status={completenessScore() >= 80 ? 'success' : completenessScore() >= 50 ? 'active' : 'exception'} />
+                      <Progress percent={completenessScore}
+                        status={completenessScore >= 80 ? 'success' : completenessScore >= 50 ? 'active' : 'exception'} />
                     </Card>
                   </Col>
                   <Col span={12}>
                     <Card size="small" style={{
-                      background: isExpiring() ? '#fef3c7' : '#ecfdf5',
+                      background: isExpiring ? '#fef3c7' : '#ecfdf5',
                       border: 'none'
                     }}>
                       <div style={{ fontSize: 12, color: '#64748b' }}>有效期状态</div>
-                      <div style={{ marginTop: 4, fontWeight: 600, color: isExpiring() ? '#92400e' : '#065f46' }}>
+                      <div style={{ marginTop: 4, fontWeight: 600, color: isExpiring ? '#92400e' : '#065f46' }}>
                         {authData.expire_date
                           ? (dayjs(authData.expire_date).isBefore(dayjs()) ? '已过期' : `至 ${authData.expire_date}`)
                           : '未设置有效期'}
@@ -246,7 +283,7 @@ export default function AuthPage({ onDataChange }: Props) {
                   <Descriptions.Item label="到期日期">
                     <Space>
                       {authData.expire_date || '-'}
-                      {isExpiring() && <Tag color="warning">即将过期/已过期</Tag>}
+                      {isExpiring && <Tag color="warning">即将过期/已过期</Tag>}
                     </Space>
                   </Descriptions.Item>
                   <Descriptions.Item label="授权范围">{authData.auth_scope || '-'}</Descriptions.Item>
@@ -280,8 +317,9 @@ export default function AuthPage({ onDataChange }: Props) {
         onOk={handleSave}
         width={640}
         okText="保存授权"
+        destroyOnClose
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" preserve={false}>
           <div className="form-section-title">基础信息</div>
           <Row gutter={16}>
             <Col span={12}>

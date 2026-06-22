@@ -186,7 +186,7 @@ export default function CaseManagePage({ onDataChange }: Props) {
               placeholder="项目类型"
               allowClear
               value={filters.project_type || undefined}
-              onChange={v => setFilters(prev => ({ ...prev, project_type: v }))}
+              onChange={v => setFilters((prev: any) => ({ ...prev, project_type: v }))}
               style={{ width: '100%' }}
             >
               {PROJECT_TYPES.map(p => <Option key={p} value={p}>{p}</Option>)}
@@ -197,7 +197,7 @@ export default function CaseManagePage({ onDataChange }: Props) {
               placeholder="治疗部位"
               allowClear
               value={filters.body_part || undefined}
-              onChange={v => setFilters(prev => ({ ...prev, body_part: v }))}
+              onChange={v => setFilters((prev: any) => ({ ...prev, body_part: v }))}
               style={{ width: '100%' }}
             >
               {BODY_PARTS.map(p => <Option key={p} value={p}>{p}</Option>)}
@@ -208,7 +208,7 @@ export default function CaseManagePage({ onDataChange }: Props) {
               placeholder="案例状态"
               allowClear
               value={filters.status || undefined}
-              onChange={v => setFilters(prev => ({ ...prev, status: v }))}
+              onChange={v => setFilters((prev: any) => ({ ...prev, status: v }))}
               style={{ width: '100%' }}
             >
               {Object.entries(CASE_STATUS).map(([k, v]) => <Option key={k} value={k}>{v.label}</Option>)}

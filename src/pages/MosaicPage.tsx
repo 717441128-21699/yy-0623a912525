@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  Row, Col, Button, Card, Tag, Space, message, Empty, Select, Input,
-  Divider, Alert, Switch, Tooltip
+  Row, Col, Button, Card, Tag, Space, message, Empty, Input,
+  Divider, Alert, Switch
 } from 'antd'
 import {
-  BlockOutlined, EyeOutlined, EyeInvisibleOutlined, CheckCircleOutlined,
-  PictureOutlined, ThunderboltOutlined, WatermarkOutlined, InfoCircleOutlined
+  BlockOutlined, EyeOutlined, EyeInvisibleOutlined,
+  ThunderboltOutlined, EditOutlined, InfoCircleOutlined
 } from '@ant-design/icons'
 import { caseApi, assetApi, imageApi, fileUrl } from '../services/api'
 import { CaseItem, AssetItem, MosaicArea } from '../types'
@@ -28,7 +28,7 @@ export default function MosaicPage({ onDataChange }: Props) {
   const [watermarkText, setWatermarkText] = useState(DEFAULT_WATERMARK)
   const [disclaimerText, setDisclaimerText] = useState(DEFAULT_DISCLAIMER)
   const [processing, setProcessing] = useState(false)
-  const imgWrapRef = useRef<HTMLDivElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
 
   const loadCases = async () => {
     const list = await caseApi.list()
@@ -52,21 +52,37 @@ export default function MosaicPage({ onDataChange }: Props) {
     setShowProcessed(!!a.processed_path)
   }
 
+  const getImageRect = () => {
+    if (!imgRef.current) return null
+    const rect = imgRef.current.getBoundingClientRect()
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height
+    }
+  }
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!imgWrapRef.current || !currentAsset) return
-    const rect = imgWrapRef.current.getBoundingClientRect()
+    if (!imgRef.current || !currentAsset) return
+    const rect = getImageRect()
+    if (!rect) return
     const x = ((e.clientX - rect.left) / rect.width) * 100
     const y = ((e.clientY - rect.top) / rect.height) * 100
+    if (x < 0 || x > 100 || y < 0 || y > 100) return
     setDrawing(true)
     setDrawStart({ x, y })
     setTempArea({ x, y, width: 0, height: 0 })
   }
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!drawing || !drawStart || !imgWrapRef.current) return
-    const rect = imgWrapRef.current.getBoundingClientRect()
-    const x = ((e.clientX - rect.left) / rect.width) * 100
-    const y = ((e.clientY - rect.top) / rect.height) * 100
+    if (!drawing || !drawStart || !imgRef.current) return
+    const rect = getImageRect()
+    if (!rect) return
+    let x = ((e.clientX - rect.left) / rect.width) * 100
+    let y = ((e.clientY - rect.top) / rect.height) * 100
+    x = Math.max(0, Math.min(100, x))
+    y = Math.max(0, Math.min(100, y))
     setTempArea({
       x: Math.min(drawStart.x, x),
       y: Math.min(drawStart.y, y),
@@ -76,7 +92,7 @@ export default function MosaicPage({ onDataChange }: Props) {
   }
 
   const handleMouseUp = () => {
-    if (tempArea && tempArea.width > 3 && tempArea.height > 3) {
+    if (tempArea && tempArea.width > 2 && tempArea.height > 2) {
       setAreas(prev => [...prev, tempArea])
     }
     setDrawing(false)
@@ -90,10 +106,10 @@ export default function MosaicPage({ onDataChange }: Props) {
 
   const autoFaceAreas = () => {
     setAreas([
-      { x: 25, y: 10, width: 50, height: 50 },
-      { x: 20, y: 68, width: 60, height: 20 }
+      { x: 25, y: 8, width: 50, height: 55 },
+      { x: 25, y: 70, width: 50, height: 18 }
     ])
-    message.info('已添加默认面部和隐私区域，可手动调整')
+    message.info('已添加默认面部和隐私区域框，可拖拽边缘调整')
   }
 
   const applyMosaic = async () => {
@@ -104,16 +120,20 @@ export default function MosaicPage({ onDataChange }: Props) {
     }
     setProcessing(true)
     try {
-      await imageApi.applyMosaic(currentAsset.id, areas)
-      message.success('马赛克处理已应用')
-      const refreshed = await assetApi.list(currentCase!.id)
-      setAssets(refreshed)
-      const updated = refreshed.find(a => a.id === currentAsset.id)
-      if (updated) {
-        setCurrentAsset(updated)
-        setShowProcessed(true)
+      const res = await imageApi.applyMosaic(currentAsset.id, areas)
+      if (res) {
+        message.success('马赛克已应用，对应区域已完全模糊遮挡')
+        const refreshed = await assetApi.list(currentCase!.id)
+        setAssets(refreshed)
+        const updated = refreshed.find(a => a.id === currentAsset.id)
+        if (updated) {
+          setCurrentAsset(updated)
+          setShowProcessed(true)
+        }
+        setAreas([])
+      } else {
+        message.error('马赛克处理失败，请重试')
       }
-      setAreas([])
     } finally {
       setProcessing(false)
     }
@@ -139,7 +159,7 @@ export default function MosaicPage({ onDataChange }: Props) {
     setProcessing(true)
     try {
       await imageApi.addDisclaimer(currentAsset.id, disclaimerText)
-      message.success('合规提示语已添加')
+      message.success('合规提示语已添加到底部')
       const refreshed = await assetApi.list(currentCase!.id)
       setAssets(refreshed)
       const updated = refreshed.find(a => a.id === currentAsset.id)
@@ -177,17 +197,17 @@ export default function MosaicPage({ onDataChange }: Props) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
           <h2 className="page-title">马赛克处理</h2>
-          <p className="page-subtitle">对照片面部、敏感隐私区域进行一键打码遮挡，添加机构水印与合规提示语</p>
+          <p className="page-subtitle">对照片面部、敏感隐私区域进行打码遮挡，添加机构水印与合规提示语</p>
         </div>
         <Space>
-          <Button icon={<WatermarkOutlined />} onClick={applyAll} loading={processing}>
+          <Button icon={<EditOutlined />} onClick={applyAll} loading={processing}>
             批量加水印+提示语
           </Button>
         </Space>
       </div>
 
       <Row gutter={16}>
-        <Col span={6}>
+        <Col span={5}>
           <div className="card-section" style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div className="card-section-title">案例列表（{cases.length}）</div>
             {cases.length === 0 ? (
@@ -216,7 +236,7 @@ export default function MosaicPage({ onDataChange }: Props) {
           </div>
         </Col>
 
-        <Col span={8}>
+        <Col span={7}>
           <div className="card-section" style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div className="card-section-title">素材照片（{assets.length}）</div>
             {!currentCase ? (
@@ -249,10 +269,10 @@ export default function MosaicPage({ onDataChange }: Props) {
           </div>
         </Col>
 
-        <Col span={10}>
+        <Col span={12}>
           <div className="card-section">
             <div className="card-section-title" style={{ justifyContent: 'space-between', display: 'flex' }}>
-              <span>图像处理</span>
+              <span>图像处理区域</span>
               {currentAsset?.processed_path && (
                 <Space size="small">
                   <Switch
@@ -262,13 +282,15 @@ export default function MosaicPage({ onDataChange }: Props) {
                     checkedChildren={<EyeOutlined />}
                     unCheckedChildren={<EyeInvisibleOutlined />}
                   />
-                  <span style={{ fontSize: 12, color: '#64748b' }}>查看处理图</span>
+                  <span style={{ fontSize: 12, color: '#64748b' }}>
+                    {showProcessed ? '处理图预览' : '原图预览'}
+                  </span>
                 </Space>
               )}
             </div>
 
             {!currentAsset ? (
-              <Empty description="请选择一张素材照片进行处理" style={{ padding: '80px 0' }} />
+              <Empty description="请选择左侧一张素材照片进行处理" style={{ padding: '80px 0' }} />
             ) : (
               <div>
                 <Alert
@@ -276,23 +298,30 @@ export default function MosaicPage({ onDataChange }: Props) {
                   showIcon
                   icon={<InfoCircleOutlined />}
                   style={{ marginBottom: 12 }}
-                  message="操作提示：在图片上按住鼠标拖拽，框选需要打码的面部或隐私区域，然后点击「应用马赛克」"
+                  message="在图片区域内按住鼠标左键拖动即可框选打码区域（仅在图片上有效，超出图片区域自动忽略）"
                 />
 
                 <div
-                  ref={imgWrapRef}
                   className={`image-canvas-wrap ${drawing ? 'drawing' : ''}`}
-                  style={{ border: '1px solid #e2e8f0', borderRadius: 6, width: '100%', display: 'flex', justifyContent: 'center', background: '#f8fafc' }}
+                  style={{
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 6,
+                    display: 'inline-block',
+                    background: '#f8fafc',
+                    position: 'relative',
+                    lineHeight: 0
+                  }}
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
                   onMouseLeave={handleMouseUp}
                 >
                   <img
+                    ref={imgRef}
                     src={fileUrl(showProcessed && currentAsset.processed_path ? currentAsset.processed_path : currentAsset.original_path)}
                     alt=""
                     draggable={false}
-                    style={{ maxHeight: 360 }}
+                    style={{ display: 'block', maxWidth: '100%', maxHeight: 420, userSelect: 'none' }}
                   />
                   {areas.map((a, i) => (
                     <div
@@ -302,10 +331,15 @@ export default function MosaicPage({ onDataChange }: Props) {
                         left: `${a.x}%`,
                         top: `${a.y}%`,
                         width: `${a.width}%`,
-                        height: `${a.height}%`
+                        height: `${a.height}%`,
+                        position: 'absolute'
                       }}
                     >
-                      <button className="remove-btn" onClick={(e) => { e.stopPropagation(); removeArea(i) }}>×</button>
+                      <button
+                        className="remove-btn"
+                        onClick={(e) => { e.stopPropagation(); removeArea(i) }}
+                        title="删除此区域"
+                      >×</button>
                     </div>
                   ))}
                   {tempArea && (
@@ -316,43 +350,50 @@ export default function MosaicPage({ onDataChange }: Props) {
                         top: `${tempArea.y}%`,
                         width: `${tempArea.width}%`,
                         height: `${tempArea.height}%`,
-                        background: 'rgba(231,111,81,0.25)'
+                        position: 'absolute',
+                        background: 'rgba(231,111,81,0.28)',
+                        border: '2px dashed #e76f51'
                       }}
                     />
                   )}
-                  <div className="draw-hint">拖拽鼠标框选打码区域</div>
+                  <div className="draw-hint" style={{ pointerEvents: drawing ? 'none' : 'auto' }}>
+                    在图片区域内拖拽鼠标框选打码
+                  </div>
                 </div>
 
                 <Divider style={{ margin: '16px 0' }} />
 
-                <Space direction="vertical" style={{ width: '100%' }} size={10}>
+                <Space direction="vertical" style={{ width: '100%' }} size={12}>
                   <div>
-                    <Space>
+                    <Space wrap>
                       <Button icon={<ThunderboltOutlined />} onClick={autoFaceAreas} size="small">
-                        自动添加面部/隐私区
+                        自动添加面部+隐私区
                       </Button>
                       <Button onClick={() => setAreas([])} size="small" disabled={areas.length === 0}>
-                        清除区域（{areas.length}）
+                        清除所有区域（{areas.length}）
                       </Button>
                       <Button
                         type="primary"
+                        danger={false}
                         icon={<BlockOutlined />}
                         onClick={applyMosaic}
                         loading={processing}
                         disabled={areas.length === 0}
+                        style={{ background: '#e76f51', borderColor: '#e76f51' }}
                       >
-                        应用马赛克
+                        应用马赛克打码
                       </Button>
+                      {areas.length > 0 && (
+                        <Tag color="orange">{areas.length} 个区域将被模糊遮挡</Tag>
+                      )}
                     </Space>
                   </div>
 
-                  <Divider style={{ margin: '8px 0' }} />
+                  <Divider style={{ margin: '4px 0' }} />
 
                   <div>
-                    <div style={{ fontSize: 13, color: '#334155', marginBottom: 6 }}>
-                      <Space>
-                        <WatermarkOutlined /> 机构水印
-                      </Space>
+                    <div style={{ fontSize: 13, color: '#334155', marginBottom: 6, fontWeight: 500 }}>
+                      <Space><EditOutlined style={{ color: '#1d4e89' }} /> 机构水印文字</Space>
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
                       <Input
@@ -361,14 +402,12 @@ export default function MosaicPage({ onDataChange }: Props) {
                         placeholder="请输入水印文字"
                       />
                       <Button type="primary" ghost onClick={applyWatermark} loading={processing}>添加水印</Button>
-                    </Space>
+                    </Space.Compact>
                   </div>
 
                   <div>
-                    <div style={{ fontSize: 13, color: '#334155', marginBottom: 6 }}>
-                      <Space>
-                        <InfoCircleOutlined /> 合规提示语
-                      </Space>
+                    <div style={{ fontSize: 13, color: '#334155', marginBottom: 6, fontWeight: 500 }}>
+                      <Space><InfoCircleOutlined style={{ color: '#e9c46a' }} /> 底部合规提示语</Space>
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
                       <Input
@@ -377,12 +416,16 @@ export default function MosaicPage({ onDataChange }: Props) {
                         placeholder="恢复期效果因人而异"
                       />
                       <Button type="primary" ghost onClick={applyDisclaimer} loading={processing}>添加提示语</Button>
-                    </Space>
+                    </Space.Compact>
                   </div>
 
-                  <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
-                    <div>原图和处理图将同时保留，可通过右上角开关预览切换</div>
-                    <div>建议处理流程：打码 → 水印 → 提示语</div>
+                  <div style={{
+                    fontSize: 12, color: '#64748b', lineHeight: 1.8,
+                    background: '#f8fafc', padding: '10px 14px', borderRadius: 6
+                  }}>
+                    <div>📌 操作流程：框选打码区域 → 应用马赛克 → 添加水印 → 添加提示语</div>
+                    <div>📌 原图和处理图两套版本均会保留，通过右上角开关切换预览</div>
+                    <div>📌 打码区域坐标按照片实际显示位置精确计算，鼠标指到哪里就打码到哪里</div>
                   </div>
                 </Space>
               </div>
